@@ -3,18 +3,45 @@ import pandas as pd
 from datetime import datetime
 import firebase_admin
 from firebase_admin import credentials, firestore
+from fastapi import FastAPI, HTTPException
 
 
 cred = credentials.Certificate("C:/H5SH/personal/companies/Karbon/pharmacy-fyp/models/sales_prediction/firebase.json") 
 firebase_admin.initialize_app(cred)
-
 db = firestore.client()
 
-def fetch_sales_data():
+model = Prophet()
+
+app = FastAPI()
+
+@app.get("/")
+def root():
+    return {"message": "Firestore + Prophet Sales Prediction API"}
+
+@app.get("/predict-sales")
+async def predict_sales(collection: str = "sales_data", periods: int = 30):
+    try:
+        data = fetch_sales_data(collection)
+        if(data.empty):
+            return {"error": "sales data is empty"}
+        
+        processed_data = preprocess_data(data)
+        forecast = forecast_sales(processed_data)
+
+        result = forecast[["ds", "yhat", "yhat_lower", "yhat_upper"]].tail(periods)
+
+        return result.to_dict(orient="records")
+    
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+        
+
+
+def fetch_sales_data(collection: str):
 
     """data from Firestore."""
 
-    sales_ref = db.collection("sales_data")
+    sales_ref = db.collection(collection)
     docs = sales_ref.stream()
 
     sales_data = []
@@ -52,7 +79,7 @@ def forecast_sales(sales_data):
 
     """Prophet to forecast"""
 
-    model = Prophet()
+    # model = Prophet()
     model.add_regressor("temperature")
     model.add_regressor("humidity")
     model.add_regressor("is_promotion")
@@ -103,5 +130,5 @@ def main():
     print("Forecasted sales:")
     print(forecast[['ds', 'yhat', 'yhat_lower', 'yhat_upper']].tail())
 
-if __name__ == "__main__":
-    main()
+# if __name__ == "__main__":
+#     main()
