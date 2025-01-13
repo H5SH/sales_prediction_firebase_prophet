@@ -4,15 +4,25 @@ from datetime import datetime
 import firebase_admin
 from firebase_admin import credentials, firestore
 from fastapi import FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
 
 
 cred = credentials.Certificate("C:/H5SH/personal/companies/Karbon/pharmacy-fyp/models/sales_prediction/firebase.json") 
 firebase_admin.initialize_app(cred)
 db = firestore.client()
 
-model = Prophet()
+# model = Prophet()
 
 app = FastAPI()
+
+# Configure CORS
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # List of allowed origins, e.g., ["https://example.com"]
+    allow_credentials=True,  # Allow cookies and authentication
+    allow_methods=["*"],  # HTTP methods to allow, e.g., ["GET", "POST"]
+    allow_headers=["*"],  # HTTP headers to allow, e.g., ["Content-Type"]
+)
 
 @app.get("/")
 def root():
@@ -79,7 +89,7 @@ def forecast_sales(sales_data):
 
     """Prophet to forecast"""
 
-    # model = Prophet()
+    model = Prophet()
     model.add_regressor("temperature")
     model.add_regressor("humidity")
     model.add_regressor("is_promotion")
