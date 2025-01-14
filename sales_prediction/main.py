@@ -44,23 +44,68 @@ async def predict_sales(collection: str = "sales_data", periods: int = 30):
     
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
-        
+    
+@app.get("/highest-selling-medicines")
+async def highest_selling_medicines(collection: str = "sales_data", top_n: int = 5):
+    try:
+        data = fetch_sales_data(collection)
+        if data.empty:
+            return {"error": "Sales data is empty"}
+
+        top_medicines = (
+            data.groupby("name")["y"]
+            .sum()
+            .sort_values(ascending=False)
+            .head(top_n)
+        )
+
+        return top_medicines.reset_index().to_dict(orient="records")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/predict-sales-medicine")
+async def predict_sales_by_medicine(
+    collection: str = "sales_data",
+    medicine_name: str = None,
+    periods: int = 30,
+):
+    try:
+        data = fetch_sales_data(collection)
+        if data.empty:
+            return {"error": "Sales data is empty"}
+
+        if medicine_name:
+            data = data[data["medicine_name"] == medicine_name]
+
+        if data.empty:
+            return {"error": f"No sales data found for medicine: {medicine_name}"}
+
+        processed_data = preprocess_data(data)
+        forecast = forecast_sales(processed_data)
+
+        result = forecast[["ds", "yhat", "yhat_lower", "yhat_upper"]].tail(periods)
+
+        return {
+            "name": medicine_name,
+            "forecast": result.to_dict(orient="records"),
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 def fetch_sales_data(collection: str):
-
-    """data from Firestore."""
-
     sales_ref = db.collection(collection)
     docs = sales_ref.stream()
 
     sales_data = []
     for doc in docs:
         record = doc.to_dict()
-        if "date" in record and "quantity_sold" in record:
+        if "date" in record and "quantity_sold" in record and "name" in record:
             sales_data.append({
                 "ds": datetime.strptime(record["date"], "%Y-%m-%d"),
                 "y": record["quantity_sold"],
+                "name": record["name"],
                 "weather_condition": record.get("weather_condition", None),
                 "temperature": record.get("temperature", None),
                 "humidity": record.get("humidity", None),
@@ -72,22 +117,16 @@ def fetch_sales_data(collection: str):
 
 def preprocess_data(sales_data):
 
-    """data for Prophet."""
-
     weather_dummies = pd.get_dummies(sales_data["weather_condition"], prefix="weather")
     day_dummies = pd.get_dummies(sales_data["day_of_week"], prefix="day")
 
-    # Combine dummy variables with sales data
     processed_data = pd.concat([sales_data, weather_dummies, day_dummies], axis=1)
 
-    # Drop unused columns
     processed_data = processed_data.drop(columns=["weather_condition", "day_of_week"])
 
     return processed_data
 
 def forecast_sales(sales_data):
-
-    """Prophet to forecast"""
 
     model = Prophet()
     model.add_regressor("temperature")
@@ -98,16 +137,13 @@ def forecast_sales(sales_data):
         if column.startswith("weather_") or column.startswith("day_"):
             model.add_regressor(column)
 
-    # Fit the model
     model.fit(sales_data)
 
-    # Predict for the next 30 days
     future = model.make_future_dataframe(periods=30)
     future["temperature"] = sales_data["temperature"].mean()  
     future["humidity"] = sales_data["humidity"].mean()
     future["is_promotion"] = 0 
 
-    # Add dummy variables for future predictions
     for column in sales_data.columns:
         if column.startswith("weather_") or column.startswith("day_"):
             future[column] = 0 
